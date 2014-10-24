@@ -1,4 +1,3 @@
-
 class Selection extends SimpleModule
 
   @className: 'Selection'
