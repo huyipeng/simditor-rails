@@ -12,45 +12,18 @@ class Module
       @::[key] = val
     obj.included?.call(@)
 
-  on: (args...) ->
-    $(@).on args...
-
-  one: (args...) ->
-    $(@).one args...
-
-  off: (args...) ->
-    $(@).off args...
-
-  trigger: (args...) ->
-    $(@).trigger args...
-
-  triggerHandler: (args...) ->
-    $(@).triggerHandler args...
-
-  _i18n: (key) ->
-    cls = @constructor
-    cls.i18n[cls.locale]?[key]
-
-  @i18n:
-    'zh-CN': {}
-
-  @locale: 'zh-CN'
-
-
-class Widget extends Module
-
   @connect: (cls) ->
     return unless typeof cls is 'function'
 
-    unless cls.className
-      throw new Error 'Widget.connect: lack of class property "className"'
+    unless cls.name
+      throw new Error 'Widget.connect: cannot connect anonymous class'
       return
 
+    cls::_connected = true
     @_connectedClasses = [] unless @_connectedClasses
     @_connectedClasses.push(cls)
-    @[cls.className] = cls if cls.className
+    @[cls.name] = cls if cls.name
 
-  _init: ->
 
   opts: {}
 
@@ -60,30 +33,69 @@ class Widget extends Module
     @constructor._connectedClasses ||= []
 
     instances = for cls in @constructor._connectedClasses
-      name = cls.className.charAt(0).toLowerCase() + cls.className.slice(1)
-      @[name] = new cls(@)
+      name = cls.name.charAt(0).toLowerCase() + cls.name.slice(1)
+      cls::_module = @ if cls::_connected
+      @[name] = new cls()
 
-    @_init()
+    if @_connected
+      @opts = $.extend {}, @opts, @_module.opts
+    else
+      @_init()
+      instance._init?() for instance in instances
 
-    instance._init?() for instance in instances
-
-    @trigger 'pluginconnected'
-
-  destroy: ->
-
-
-class Plugin extends Module
-
-  @className: 'Plugin'
-
-  opts: {}
-
-  constructor: (@widget) ->
-    @opts = $.extend({}, @opts, @widget.opts)
+    @trigger 'initialized'
 
   _init: ->
 
+  on: (args...) ->
+    $(@).on args...
+    @
 
-window.Module = Module
-window.Widget = Widget
-window.Plugin = Plugin
+  one: (args...) ->
+    $(@).one args...
+    @
+
+  off: (args...) ->
+    $(@).off args...
+    @
+
+  trigger: (args...) ->
+    $(@).trigger args...
+    @
+
+  triggerHandler: (args...) ->
+    $(@).triggerHandler args...
+
+  _t: (args...) ->
+    @constructor._t args...
+
+  @_t: (key, args...) ->
+    result = @i18n[@locale]?[key] || ''
+
+    return result unless args.length > 0
+
+    result = result.replace /([^%]|^)%(?:(\d+)\$)?s/g, (p0, p, position) ->
+      if position
+        p + args[parseInt(position) - 1]
+      else
+        p + args.shift()
+
+    result.replace /%%s/g, '%s'
+
+  @i18n:
+    'zh-CN': {}
+
+  @locale: 'zh-CN'
+
+
+
+# monkey patch for IE to support Function.name
+if Function.prototype.name == undefined && Object.defineProperty
+  Object.defineProperty Function.prototype, 'name',
+    get: ->
+      re = /function\s+([^\s(]+)\s*\(/
+      results = re.exec @toString()
+      if (results && results.length > 1) then results[1] else ""
+    set: (val) ->
+
+

@@ -1,11 +1,11 @@
 @charset "UTF-8";
-@import 'font-awesome';
+
 $simditor-button-height: 40px;
 
 .simditor {
   position: relative;
   border: 1px solid #c9d8db;
-  width: 720px;
+
   .simditor-wrapper {
     position: relative;
     background: #ffffff;
@@ -26,7 +26,7 @@ $simditor-button-height: 40px;
 
     &.toolbar-floating {
       .simditor-toolbar {
-        //position: fixed;
+        position: fixed;
         top: 0;
         z-index: 10;
         box-shadow: 0 0 6px rgba(0,0,0,0.1);
@@ -36,7 +36,6 @@ $simditor-button-height: 40px;
     .simditor-image-loading {
       width: 100%;
       height: 100%;
-      margin: 0 5px;
       background: rgba(0,0,0,0.4);
       position: absolute;
       top: 0;
@@ -46,7 +45,7 @@ $simditor-button-height: 40px;
       span {
         width: 30px;
         height: 30px;
-        background: #ffffff image-url('simditor/loading-upload.gif') no-repeat center center;
+        background: #ffffff url(../images/loading-upload.gif) no-repeat center center;
         border-radius: 30px;
         position: absolute;
         top: 50%;
@@ -462,15 +461,28 @@ $simditor-button-height: 40px;
         width: 200px;
         box-sizing: border-box;
         font-size: 12px;
+
+        &.image-size {
+          width: 87px;
+        }
+      }
+
+      .times {
+        float: left;
+        width: 26px;
+        font-size: 12px;
+        text-align: center;
       }
     }
 
     &.link-popover .btn-unlink,
-    &.image-popover .btn-upload {
+    &.image-popover .btn-upload,
+    &.image-popover .btn-restore {
       float: left;
       margin: 0 0 0 8px;
       color: #333333;
       font-size: 14px;
+      outline: 0;
 
       span {
         opacity: 0.6;
@@ -660,7 +672,6 @@ $simditor-button-height: 40px;
 
 
   img {
-    max-width: 800px;
     margin: 0 5px;
     vertical-align: middle;
   }

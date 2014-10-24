@@ -1,22 +1,11 @@
 
-class Selection extends Plugin
+class Selection extends SimpleModule
 
   @className: 'Selection'
 
-  constructor: (args...) ->
-    super args...
-    @sel = document.getSelection()
-    @editor = @widget
-
   _init: ->
-
-    #@editor.on 'selectionchanged focus', (e) =>
-      #range = @editor.selection.getRange()
-      #return unless range?
-      #$container = $(range.commonAncestorContainer)
-
-      #if range.collapsed and $container.is('.simditor-body') and @editor.util.isBlockNode($container.children())
-        #@editor.blur()
+    @editor = @_module
+    @sel = document.getSelection()
 
   clear: ->
     try
@@ -172,12 +161,14 @@ class Selection extends Plugin
   save: (range = @getRange()) ->
     return if @_selectionSaved
 
+    endRange = range.cloneRange()
+    endRange.collapse(false)
+
     startCaret = $('<span/>').addClass('simditor-caret-start')
     endCaret = $('<span/>').addClass('simditor-caret-end')
 
+    endRange.insertNode(endCaret[0])
     range.insertNode(startCaret[0])
-    range.collapse(false)
-    range.insertNode(endCaret[0])
 
     @clear()
     @_selectionSaved = true
@@ -214,13 +205,10 @@ class Selection extends Plugin
 
 
 
-class Formatter extends Plugin
+class Formatter extends SimpleModule
 
-  @className: 'Formatter'
-
-  constructor: (args...) ->
-    super args...
-    @editor = @widget
+  _init: ->
+    @editor = @_module
 
     @_allowedTags = ['br', 'a', 'img', 'b', 'strong', 'i', 'u', 'font', 'p', 'ul', 'ol', 'li', 'blockquote', 'pre', 'h1', 'h2', 'h3', 'h4', 'hr']
     @_allowedAttributes =
@@ -234,7 +222,6 @@ class Formatter extends Plugin
       h3: ['data-indent']
       h4: ['data-indent']
 
-  _init: ->
     @editor.body.on 'click', 'a', (e) =>
       false
 
@@ -261,7 +248,7 @@ class Formatter extends Plugin
 
     findLinkNode $el
 
-    re = /(https?:\/\/|www\.)[\w\-\.\?&=\/#%:,\!\+]+/ig
+    re = /(https?:\/\/|www\.)[\w\-\.\?&=\/#%:,@\!\+]+/ig
     for $node in linkNodes
       text = $node.text()
       replaceEls = []
@@ -309,6 +296,7 @@ class Formatter extends Plugin
 
   cleanNode: (node, recursive) ->
     $node = $(node)
+    return unless $node.length > 0
 
     if $node[0].nodeType == 3
       text = $node.text().replace(/(\r\n|\n|\r)/gm, '')
@@ -394,29 +382,24 @@ class Formatter extends Plugin
 
 
 
-
-class InputManager extends Plugin
-
-  @className: 'InputManager'
+class InputManager extends SimpleModule
 
   opts:
     pasteImage: false
-
-  constructor: (args...) ->
-    super args...
-    @editor = @widget
-    @opts.pasteImage = 'inline' if @opts.pasteImage and typeof @opts.pasteImage != 'string'
-
-    # handlers which will be called when specific key is pressed in specific node
-    @_keystrokeHandlers = {}
-
-    @_shortcuts = {}
 
   _modifierKeys: [16, 17, 18, 91, 93, 224]
 
   _arrowKeys: [37..40]
 
   _init: ->
+    @editor = @_module
+
+    @opts.pasteImage = 'inline' if @opts.pasteImage and typeof @opts.pasteImage != 'string'
+
+    # handlers which will be called when specific key is pressed in specific node
+    @_keystrokeHandlers = {}
+
+    @_shortcuts = {}
 
     @_pasteArea = $('<div/>')
       .css({
@@ -449,7 +432,23 @@ class InputManager extends Plugin
       .addClass('simditor-clean-paste-area')
       .appendTo(@editor.el)
 
+    $(document).on 'selectionchange.simditor' + @editor.id, (e) =>
+      return unless @focused
+
+      if @_selectionTimer
+        clearTimeout @_selectionTimer
+        @_selectionTimer = null
+      @_selectionTimer = setTimeout =>
+        @editor.trigger 'selectionchanged'
+      , 50
+
     @editor.on 'valuechanged', =>
+      unless @editor.util.closestBlockEl()
+        return unless @focused
+        @editor.selection.save()
+        @editor.formatter.format()
+        @editor.selection.restore()
+
       # make sure each code block and table has siblings
       @editor.body.find('hr, pre, .simditor-table').each (i, el) =>
         $el = $(el)
@@ -472,6 +471,12 @@ class InputManager extends Plugin
             , 10
 
       @editor.body.find('pre:empty').append(@editor.util.phBr)
+
+      if !@editor.util.supportSelectionChange and @focused
+        @editor.trigger 'selectionchanged'
+
+    @editor.on 'selectionchanged', (e) =>
+      @editor.undoManager.update()
 
 
     @editor.body.on('keydown', $.proxy(@_onKeyDown, @))
@@ -518,7 +523,7 @@ class InputManager extends Plugin
 
     setTimeout =>
       @editor.triggerHandler 'focus'
-      #@editor.trigger 'selectionchanged'
+      @editor.trigger 'selectionchanged'
     , 0
 
   _onBlur: (e) ->
@@ -530,10 +535,10 @@ class InputManager extends Plugin
     @editor.triggerHandler 'blur'
 
   _onMouseUp: (e) ->
-    setTimeout =>
-      @editor.trigger 'selectionchanged'
-      @editor.undoManager.update()
-    , 0
+    unless @editor.util.supportSelectionChange
+      setTimeout =>
+        @editor.trigger 'selectionchanged'
+      , 0
 
   _onKeyDown: (e) ->
     if @editor.triggerHandler(e) == false
@@ -549,7 +554,6 @@ class InputManager extends Plugin
       result = @_keystrokeHandlers[e.which]['*']?(e)
       if result
         @editor.trigger 'valuechanged'
-        @editor.trigger 'selectionchanged'
         return false
 
       @editor.util.traverseUp (node) =>
@@ -564,7 +568,6 @@ class InputManager extends Plugin
         false if result == true or result == false
       if result
         @editor.trigger 'valuechanged'
-        @editor.trigger 'selectionchanged'
         return false
 
     if e.which in @_modifierKeys or e.which in @_arrowKeys
@@ -584,20 +587,17 @@ class InputManager extends Plugin
         @editor.formatter.cleanNode $newBlockEl, true
         @editor.selection.restore()
         @editor.trigger 'valuechanged'
-        @editor.trigger 'selectionchanged'
       , 10
       @typing = true
     else if @_typing
       clearTimeout @_typing if @_typing != true
       @_typing = setTimeout =>
         @editor.trigger 'valuechanged'
-        @editor.trigger 'selectionchanged'
         @_typing = false
       , 200
     else
       setTimeout =>
         @editor.trigger 'valuechanged'
-        @editor.trigger 'selectionchanged'
       , 10
       @_typing = true
 
@@ -611,12 +611,12 @@ class InputManager extends Plugin
     if @editor.triggerHandler(e) == false
       return false
 
-    if e.which in @_arrowKeys
+    if !@editor.util.supportSelectionChange and e.which in @_arrowKeys
       @editor.trigger 'selectionchanged'
       @editor.undoManager.update()
       return
 
-    if e.which == 8 and @editor.util.isEmptyNode(@editor.body)
+    if (e.which == 8 or e.which == 46) and @editor.util.isEmptyNode(@editor.body)
       @editor.body.empty()
       p = $('<p/>').append(@editor.util.phBr)
         .appendTo(@editor.body)
@@ -733,9 +733,16 @@ class InputManager extends Plugin
         else if $blockEl.is('p') and @editor.util.isEmptyNode $blockEl
           $blockEl.replaceWith pasteContent
           @editor.selection.setRangeAtEndOf(pasteContent, range)
-        else if pasteContent.is('ul, ol') and $blockEl.is 'li'
-          $blockEl.parent().after pasteContent
-          @editor.selection.setRangeAtEndOf(pasteContent, range)
+        else if pasteContent.is('ul, ol')
+          if pasteContent.find('li').length == 1
+            pasteContent = $('<div/>').text(pasteContent.text())
+            @editor.selection.insertNode($(node)[0], range) for node in pasteContent.contents()
+          else if $blockEl.is 'li'
+            $blockEl.parent().after pasteContent
+            @editor.selection.setRangeAtEndOf(pasteContent, range)
+          else
+            $blockEl.after pasteContent
+            @editor.selection.setRangeAtEndOf(pasteContent, range)
         else
           $blockEl.after pasteContent
           @editor.selection.setRangeAtEndOf(pasteContent, range)
@@ -754,7 +761,6 @@ class InputManager extends Plugin
         @editor.selection.setRangeAtEndOf(pasteContent.last(), range)
 
       @editor.trigger 'valuechanged'
-      @editor.trigger 'selectionchanged'
     , 10
 
   _onDrop: (e) ->
@@ -763,7 +769,6 @@ class InputManager extends Plugin
 
     setTimeout =>
       @editor.trigger 'valuechanged'
-      @editor.trigger 'selectionchanged'
     , 0
 
 
@@ -776,17 +781,13 @@ class InputManager extends Plugin
     @_shortcuts[keys] = $.proxy(handler, this)
 
 
+
 # Standardize keystroke actions across browsers
 
-class Keystroke extends Plugin
-
-  @className: 'Keystroke'
-
-  constructor: (args...) ->
-    super args...
-    @editor = @widget
+class Keystroke extends SimpleModule
 
   _init: ->
+    @editor = @_module
 
     # safari doesn't support shift + enter default behavior
     if @editor.util.browser.safari
@@ -890,8 +891,14 @@ class Keystroke extends Plugin
 
 
     # press enter in a code block: insert \n instead of br
+    # press shift + enter in code block: insert a paragrash after code block
     @editor.inputManager.addKeystrokeHandler '13', 'pre', (e, $node) =>
       e.preventDefault()
+      if e.shiftKey
+        $p = $('<p/>').append(@editor.util.phBr).insertAfter($node)
+        @editor.selection.setRangeAtStartOf $p
+        return true
+
       range = @editor.selection.getRange()
       breakNode = null
 
@@ -981,7 +988,7 @@ class Keystroke extends Plugin
 
 
 
-class UndoManager extends Plugin
+class UndoManager extends SimpleModule
 
   @className: 'UndoManager'
 
@@ -991,12 +998,10 @@ class UndoManager extends Plugin
 
   _timer: null
 
-  constructor: (args...) ->
-    super args...
-    @editor = @widget
+  _init: ->
+    @editor = @_module
     @_stack = []
 
-  _init: ->
     if @editor.util.os.mac
       undoShortcut = 'cmd+90'
       redoShortcut = 'shift+cmd+90'
@@ -1067,7 +1072,6 @@ class UndoManager extends Plugin
     @editor.sync()
 
     @editor.trigger 'valuechanged', ['undo']
-    @editor.trigger 'selectionchanged', ['undo']
 
   redo: ->
     return if @_index < 0 or @_stack.length < @_index + 2
@@ -1083,9 +1087,9 @@ class UndoManager extends Plugin
     @editor.sync()
 
     @editor.trigger 'valuechanged', ['undo']
-    @editor.trigger 'selectionchanged', ['undo']
 
   update: () ->
+    return if @_timer
     currentState = @currentState()
     return unless currentState
 
@@ -1203,18 +1207,13 @@ class UndoManager extends Plugin
 
 
 
-
-
-class Util extends Plugin
+class Util extends SimpleModule
 
   @className: 'Util'
 
-  constructor: (args...) ->
-    super args...
-    @phBr = '' if @browser.msie and @browser.version < 11
-    @editor = @widget
-
   _init: ->
+    @editor = @_module
+    @phBr = '' if @browser.msie and @browser.version < 11
 
   phBr: '<br/>'
 
@@ -1260,6 +1259,24 @@ class Util extends Plugin
     else
       {}
   )()
+
+  # check whether the browser supports selectionchange event
+  supportSelectionChange: (->
+    onselectionchange = document.onselectionchange
+    if onselectionchange != undefined
+      try
+        document.onselectionchange = 0
+        return document.onselectionchange == null
+      catch e
+      finally
+        document.onselectionchange = onselectionchange
+    false
+  )()
+
+  # force element to reflow, about relow: 
+  # http://blog.letitialew.com/post/30425074101/repaints-and-reflows-manipulating-the-dom-responsibly
+  reflow: (el = document) ->
+    $(el)[0].offsetHeight
 
   metaKey: (e) ->
     isMac = /Mac/.test navigator.userAgent
@@ -1397,7 +1414,6 @@ class Util extends Plugin
       @editor.selection.insertNode spaceNode
 
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
     true
 
   outdent: () ->
@@ -1442,7 +1458,6 @@ class Util extends Plugin
       return false
 
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
     true
 
   # convert base64 data url to blob object for pasting images in firefox and IE11
@@ -1489,27 +1504,27 @@ class Util extends Plugin
     bb.getBlob(mimeString)
 
 
-class Toolbar extends Plugin
+
+
+class Toolbar extends SimpleModule
 
   @className: 'Toolbar'
 
   opts:
     toolbar: true
     toolbarFloat: true
+    toolbarHidden: false
 
   _tpl:
     wrapper: '<div class="simditor-toolbar"><ul></ul></div>'
     separator: '<li><span class="separator"></span></li>'
 
-  constructor: (args...) ->
-    super args...
-    @editor = @widget
-
   _init: ->
+    @editor = @_module
     return unless @opts.toolbar
 
     unless $.isArray @opts.toolbar
-      @opts.toolbar = ['bold', 'italic', 'underline', 'strikethrough', '|', 'ol', 'ul', '|', 'link', 'image', '|', 'indent', 'outdent' , '|', 'undo' ]
+      @opts.toolbar = ['bold', 'italic', 'underline', 'strikethrough', '|', 'ol', 'ul', 'blockquote', 'code', '|', 'link', 'image', '|', 'indent', 'outdent']
 
     @_render()
 
@@ -1519,14 +1534,21 @@ class Toolbar extends Plugin
     @wrapper.on 'mousedown', (e) =>
       @list.find('.menu-on').removeClass('.menu-on')
 
-    $(document).on 'mousedown.simditor', (e) =>
+    $(document).on 'mousedown.simditor' + @editor.id, (e) =>
       @list.find('.menu-on').removeClass('.menu-on')
 
-    if @opts.toolbarFloat
+    if not @opts.toolbarHidden and @opts.toolbarFloat
       @wrapper.width @wrapper.outerWidth()
-      unless @editor.util.os.mobile
-        @wrapper.css 'left', @wrapper.offset().left
       toolbarHeight = @wrapper.outerHeight()
+
+      unless @editor.util.os.mobile
+        $(window).on 'resize.simditor-' + @editor.id, (e) =>
+          @wrapper.css 'position', 'static'
+          @editor.util.reflow @wrapper
+          @wrapper.css 'left', @wrapper.offset().left
+          @wrapper.css 'position', ''
+        .resize()
+
       $(window).on 'scroll.simditor-' + @editor.id, (e) =>
         topEdge = @editor.wrapper.offset().top
         bottomEdge = topEdge + @editor.wrapper.outerHeight() - 80
@@ -1545,7 +1567,7 @@ class Toolbar extends Plugin
             @wrapper.css
               top: scrollTop - topEdge
 
-    @editor.on 'selectionchanged focus', =>
+    @editor.on 'selectionchanged', =>
       @toolbarStatus()
 
     @editor.on 'destroy', =>
@@ -1568,9 +1590,13 @@ class Toolbar extends Plugin
         throw new Error 'simditor: invalid toolbar button "' + name + '"'
         continue
 
-      @buttons.push new @constructor.buttons[name](@editor)
+      @buttons.push new @constructor.buttons[name]
+        editor: @editor
 
-    @editor.placeholderEl.css 'top', @wrapper.outerHeight()
+    if @opts.toolbarHidden
+      @wrapper.hide()
+    else
+      @editor.placeholderEl.css 'top', @wrapper.outerHeight()
 
   toolbarStatus: (name) ->
     return unless @editor.inputManager.focused
@@ -1601,10 +1627,11 @@ class Toolbar extends Plugin
 
 
 
-class Simditor extends Widget
+
+class Simditor extends SimpleModule
   @connect Util
-  @connect UndoManager
   @connect InputManager
+  @connect UndoManager
   @connect Keystroke
   @connect Formatter
   @connect Selection
@@ -1615,11 +1642,10 @@ class Simditor extends Widget
   opts:
     textarea: null
     placeholder: ''
-    defaultImage: ''
+    defaultImage: 'images/image.png'
     params: {}
     upload: false
     tabIndent: true
-    width: '720px'
 
   _init: ->
     @textarea = $(@opts.textarea)
@@ -1648,7 +1674,7 @@ class Simditor extends Widget
         @setValue ''
 
     # set default value after all plugins are connected
-    @on 'pluginconnected', =>
+    @on 'initialized', =>
       if @opts.placeholder
         @on 'valuechanged', =>
           @_placeholder()
@@ -1675,9 +1701,10 @@ class Simditor extends Widget
     @wrapper = @el.find '.simditor-wrapper'
     @body = @wrapper.find '.simditor-body'
     @placeholderEl = @wrapper.find('.simditor-placeholder').append(@opts.placeholder)
+
     @el.append(@textarea)
-      .data 'simditor', this
-    @textarea.data('simditor', this)
+      .data 'simditor', @
+    @textarea.data('simditor', @)
       .hide()
       .blur()
     @body.attr 'tabindex', @textarea.attr('tabindex')
@@ -1697,7 +1724,7 @@ class Simditor extends Widget
           name: key,
           value: val
         }).insertAfter(@textarea)
-    @el.css('width',@opts.width)
+
   _placeholder: ->
     children = @body.children()
     if children.length == 0 or (children.length == 1 and @util.isEmptyNode(children) and (children.data('indent') ? 0) < 1)
@@ -1763,7 +1790,7 @@ class Simditor extends Widget
     @body.blur()
 
   hidePopover: ->
-    @wrapper.find('.simditor-popover').each (i, popover) =>
+    @el.find('.simditor-popover').each (i, popover) =>
       popover = $(popover).data('popover')
       popover.hide() if popover.active
 
@@ -1786,11 +1813,13 @@ class Simditor extends Widget
     @off()
 
 
+
+
 window.Simditor = Simditor
 
 
 
-class Button extends Module
+class Button extends SimpleModule
 
   _tpl:
     item: '<li><a tabindex="-1" unselectable="on" class="toolbar-item" href="javascript:;"><span></span></a></li>'
@@ -1820,7 +1849,11 @@ class Button extends Module
 
   shortcut: null
 
-  constructor: (@editor) ->
+  constructor: (opts) ->
+    @editor = opts.editor
+    super opts
+
+  _init: ->
     @render()
 
     @el.on 'mousedown', (e) =>
@@ -1916,12 +1949,16 @@ class Button extends Module
         .text(menuItem.text)
 
   setActive: (active) ->
+    return if active == @active
     @active = active
     @el.toggleClass('active', @active)
+    @editor.toolbar.trigger 'buttonstatus', [@]
 
   setDisabled: (disabled) ->
+    return if disabled == @disabled
     @disabled = disabled
     @el.toggleClass('disabled', @disabled)
+    @editor.toolbar.trigger 'buttonstatus', [@]
 
   status: ($node) ->
     @setDisabled $node.is(@disableTag) if $node?
@@ -1933,10 +1970,11 @@ class Button extends Module
   command: (param) ->
 
 
-window.SimditorButton = Button
+Simditor.Button = Button
 
 
-class Popover extends Module
+
+class Popover extends SimpleModule
 
   offset:
     top: 4
@@ -1946,9 +1984,14 @@ class Popover extends Module
 
   active: false
 
-  constructor: (@editor) ->
+  constructor: (opts) ->
+    @button = opts.button
+    @editor = opts.button.editor
+    super opts
+
+  _init: ->
     @el = $('<div class="simditor-popover"></div>')
-      .appendTo(@editor.wrapper)
+      .appendTo(@editor.el)
       .data('popover', @)
     @render()
 
@@ -1993,16 +2036,16 @@ class Popover extends Module
 
   refresh: (position = 'bottom') ->
     return unless @active
-    wrapperOffset = @editor.wrapper.offset()
+    editorOffset = @editor.el.offset()
     targetOffset = @target.offset()
     targetH = @target.outerHeight()
 
     if position is 'bottom'
-      top = targetOffset.top - wrapperOffset.top + targetH
+      top = targetOffset.top - editorOffset.top + targetH
     else if position is 'top'
-      top = targetOffset.top - wrapperOffset.top - @el.height()
+      top = targetOffset.top - editorOffset.top - @el.height()
 
-    left = Math.min(targetOffset.left - wrapperOffset.left, @editor.wrapper.width() - @el.outerWidth() - 10)
+    left = Math.min(targetOffset.left - editorOffset.left, @editor.wrapper.width() - @el.outerWidth() - 10)
 
     @el.css({
       top: top + @offset.top,
@@ -2016,14 +2059,16 @@ class Popover extends Module
     @el.remove()
 
 
-window.SimditorPopover = Popover
+Simditor.Popover = Popover
+
+
 
 
 class TitleButton extends Button
 
   name: 'title'
 
-  title: '标题文字'
+  title: Simditor._t 'title'
 
   htmlTag: 'h1, h2, h3, h4'
 
@@ -2031,28 +2076,27 @@ class TitleButton extends Button
 
   menu: [{
     name: 'normal',
-    text: '普通文本',
+    text: Simditor._t('normalText'),
     param: 'p'
   }, '|', {
     name: 'h1',
-    text: '标题 1',
+    text: Simditor._t('title') + ' 1',
     param: 'h1'
   }, {
     name: 'h2',
-    text: '标题 2',
+    text: Simditor._t('title') + ' 2',
     param: 'h2'
   }, {
     name: 'h3',
-    text: '标题 3',
+    text: Simditor._t('title') + ' 3',
     param: 'h3'
   }]
 
   setActive: (active, param) ->
-    @active = active
-    if active
-      @el.addClass('active active-' + param)
-    else
-      @el.removeClass('active active-p active-h1 active-h2 active-h3')
+    super active
+
+    @el.removeClass 'active-p active-h1 active-h2 active-h3'
+    @el.addClass('active active-' + param) if active
 
   status: ($node) ->
     @setDisabled $node.is(@disableTag) if $node?
@@ -2086,7 +2130,6 @@ class TitleButton extends Button
     @editor.selection.restore()
 
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
 
   _convertEl: (el, param) ->
     $el = $(el)
@@ -2101,7 +2144,7 @@ class TitleButton extends Button
     results
 
 
-Simditor.Toolbar.addButton(TitleButton)
+Simditor.Toolbar.addButton TitleButton
 
 
 
@@ -2111,7 +2154,7 @@ class BoldButton extends Button
 
   icon: 'bold'
 
-  title: '加粗文字'
+  title: Simditor._t 'bold'
 
   htmlTag: 'b, strong'
 
@@ -2138,10 +2181,13 @@ class BoldButton extends Button
   command: ->
     document.execCommand 'bold'
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
+
+    # bold command won't trigger selectionchange event automatically
+    $(document).trigger 'selectionchange'
 
 
-Simditor.Toolbar.addButton(BoldButton)
+Simditor.Toolbar.addButton BoldButton
+
 
 
 class ItalicButton extends Button
@@ -2150,7 +2196,7 @@ class ItalicButton extends Button
 
   icon: 'italic'
 
-  title: '斜体文字'
+  title: Simditor._t 'italic'
 
   htmlTag: 'i'
 
@@ -2178,10 +2224,12 @@ class ItalicButton extends Button
   command: ->
     document.execCommand 'italic'
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
+
+    # italic command won't trigger selectionchange event automatically
+    $(document).trigger 'selectionchange'
 
 
-Simditor.Toolbar.addButton(ItalicButton)
+Simditor.Toolbar.addButton ItalicButton
 
 
 
@@ -2191,7 +2239,7 @@ class UnderlineButton extends Button
 
   icon: 'underline'
 
-  title: '下划线文字'
+  title: Simditor._t 'underline'
 
   htmlTag: 'u'
 
@@ -2218,10 +2266,12 @@ class UnderlineButton extends Button
   command: ->
     document.execCommand 'underline'
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
+
+    # underline command won't trigger selectionchange event automatically
+    $(document).trigger 'selectionchange'
 
 
-Simditor.Toolbar.addButton(UnderlineButton)
+Simditor.Toolbar.addButton UnderlineButton
 
 
 
@@ -2232,7 +2282,7 @@ class ColorButton extends Button
 
   icon: 'font'
 
-  title: '文字颜色'
+  title: Simditor._t 'color'
 
   disableTag: 'pre'
 
@@ -2251,8 +2301,7 @@ class ColorButton extends Button
         <li><a href="javascript:;" class="font-color font-color-5" data-color=""></a></li>
         <li><a href="javascript:;" class="font-color font-color-6" data-color=""></a></li>
         <li><a href="javascript:;" class="font-color font-color-7" data-color=""></a></li>
-        <li><a href="javascript:;" class="font-color font-color-8" data-color=""></a></li>
-        <li class="remove-color"><a href="javascript:;" class="link-remove-color">去掉颜色</a></li>
+        <li><a href="javascript:;" class="font-color font-color-default" data-color=""></a></li>
       </ul>
     ''').appendTo(@menuWrapper)
 
@@ -2262,25 +2311,19 @@ class ColorButton extends Button
     @menuWrapper.on 'click', '.font-color', (e) =>
       @wrapper.removeClass('menu-on')
       $link = $(e.currentTarget)
-      rgb = window.getComputedStyle($link[0], null).getPropertyValue('background-color')
-      hex = @_convertRgbToHex rgb
+
+      if $link.hasClass 'font-color-default'
+        $p = @editor.body.find 'p, li'
+        return unless $p.length > 0
+        rgb = window.getComputedStyle($p[0], null).getPropertyValue('color')
+        hex = @_convertRgbToHex rgb
+      else
+        rgb = window.getComputedStyle($link[0], null).getPropertyValue('background-color')
+        hex = @_convertRgbToHex rgb
+
       return unless hex
       document.execCommand 'foreColor', false, hex
       @editor.trigger 'valuechanged'
-      @editor.trigger 'selectionchanged'
-
-    @menuWrapper.on 'click', '.link-remove-color', (e) =>
-      @wrapper.removeClass('menu-on')
-      $p = @editor.body.find 'p'
-      return unless $p.length > 0
-
-      rgb = window.getComputedStyle($p[0], null).getPropertyValue('color')
-      hex = @_convertRgbToHex rgb
-      return unless hex
-
-      document.execCommand 'foreColor', false, hex
-      @editor.trigger 'valuechanged'
-      @editor.trigger 'selectionchanged'
 
   _convertRgbToHex:(rgb) ->
     re = /rgb\((\d+),\s?(\d+),\s?(\d+)\)/g
@@ -2296,7 +2339,8 @@ class ColorButton extends Button
     rgbToHex match[1] * 1, match[2] * 1, match[3] * 1
 
 
-Simditor.Toolbar.addButton(ColorButton)
+Simditor.Toolbar.addButton ColorButton
+
 
 
 
@@ -2371,7 +2415,6 @@ class ListButton extends Button
     @editor.selection.restore()
 
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
 
   _convertEl: (el) ->
     $el = $(el)
@@ -2404,7 +2447,7 @@ class ListButton extends Button
 class OrderListButton extends ListButton
   type: 'ol'
   name: 'ol'
-  title: '有序列表'
+  title: Simditor._t 'ol'
   icon: 'list-ol'
   htmlTag: 'ol'
   shortcut: 'cmd+191'
@@ -2419,7 +2462,7 @@ class OrderListButton extends ListButton
 class UnorderListButton extends ListButton
   type: 'ul'
   name: 'ul'
-  title: '无序列表'
+  title: Simditor._t 'ul'
   icon: 'list-ul'
   htmlTag: 'ul'
   shortcut: 'cmd+190'
@@ -2431,8 +2474,9 @@ class UnorderListButton extends ListButton
       @shortcut = 'ctrl+190'
     super()
 
-Simditor.Toolbar.addButton(OrderListButton)
-Simditor.Toolbar.addButton(UnorderListButton)
+Simditor.Toolbar.addButton OrderListButton
+Simditor.Toolbar.addButton UnorderListButton
+
 
 
 
@@ -2442,7 +2486,7 @@ class BlockquoteButton extends Button
 
   icon: 'quote-left'
 
-  title: '引用'
+  title: Simditor._t 'blockquote'
 
   htmlTag: 'blockquote'
 
@@ -2475,7 +2519,6 @@ class BlockquoteButton extends Button
     @editor.selection.restore()
 
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
 
   _convertEl: (el) ->
     $el = $(el)
@@ -2491,8 +2534,7 @@ class BlockquoteButton extends Button
     results
 
 
-
-Simditor.Toolbar.addButton(BlockquoteButton)
+Simditor.Toolbar.addButton BlockquoteButton
 
 
 
@@ -2502,15 +2544,14 @@ class CodeButton extends Button
 
   icon: 'code'
 
-  title: '插入代码'
+  title: Simditor._t 'code'
 
   htmlTag: 'pre'
 
   disableTag: 'li, table'
 
-
-  constructor: (@editor) ->
-    super @editor
+  _init: ->
+    super()
 
     @editor.on 'decorate', (e, $el) =>
       $el.find('pre').each (i, pre) =>
@@ -2522,7 +2563,8 @@ class CodeButton extends Button
 
   render: (args...) ->
     super args...
-    @popover = new CodePopover(@editor)
+    @popover = new CodePopover
+      button: @
 
   status: ($node) ->
     result = super $node
@@ -2569,7 +2611,6 @@ class CodeButton extends Button
     @editor.selection.setRangeAtEndOf results[0]
 
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
 
   _convertEl: (el) ->
     $el = $(el)
@@ -2627,7 +2668,7 @@ class CodePopover extends Popover
         .removeAttr('data-lang')
 
       if @lang isnt -1
-        @target.addClass('lang-' + @lang) 
+        @target.addClass('lang-' + @lang)
         @target.attr('data-lang', @lang)
 
       @target.addClass('selected') if selected
@@ -2635,10 +2676,11 @@ class CodePopover extends Popover
   show: (args...) ->
     super args...
     @lang = @target.attr('data-lang')
-    @selectEl.val(@lang) if @lang?
+    if @lang? then @selectEl.val(@lang) else @selectEl.val(-1)
 
 
-Simditor.Toolbar.addButton(CodeButton)
+Simditor.Toolbar.addButton CodeButton
+
 
 
 
@@ -2649,7 +2691,7 @@ class LinkButton extends Button
 
   icon: 'link'
 
-  title: '插入链接'
+  title: Simditor._t 'insertLink'
 
   htmlTag: 'a'
 
@@ -2657,7 +2699,8 @@ class LinkButton extends Button
 
   render: (args...) ->
     super args...
-    @popover = new LinkPopover(@editor)
+    @popover = new LinkPopover
+      button: @
 
   status: ($node) ->
     @setDisabled $node.is(@disableTag) if $node?
@@ -2701,7 +2744,7 @@ class LinkButton extends Button
       $link = $('<a/>', {
         href: 'http://www.example.com',
         target: '_blank',
-        text: linkText || '链接文字'
+        text: linkText || Simditor._t('linkText')
       })
 
       if $startBlock[0] == $endBlock[0]
@@ -2722,7 +2765,6 @@ class LinkButton extends Button
 
     @editor.selection.selectRange range
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
 
 
 class LinkPopover extends Popover
@@ -2730,12 +2772,12 @@ class LinkPopover extends Popover
   _tpl: """
     <div class="link-settings">
       <div class="settings-field">
-        <label>文本</label>
+        <label>#{ Simditor._t 'text' }</label>
         <input class="link-text" type="text"/>
-        <a class="btn-unlink" href="javascript:;" title="取消链接" tabindex="-1"><span class="fa fa-unlink"></span></a>
+        <a class="btn-unlink" href="javascript:;" title="#{ Simditor._t 'removeLink' }" tabindex="-1"><span class="fa fa-unlink"></span></a>
       </div>
       <div class="settings-field">
-        <label>链接</label>
+        <label>#{ Simditor._t 'linkUrl' }</label>
         <input class="link-url" type="text"/>
       </div>
     </div>
@@ -2754,7 +2796,11 @@ class LinkPopover extends Popover
 
     @urlEl.on 'keyup', (e) =>
       return if e.which == 13
-      @target.attr 'href', @urlEl.val()
+
+      val = @urlEl.val()
+      val = 'http://' + val unless /https?:\/\/|^\//ig.test(val) or !val
+
+      @target.attr 'href', val
 
     $([@urlEl[0], @textEl[0]]).on 'keydown', (e) =>
       if e.which == 13 or e.which == 27 or (!e.shiftKey and e.which == 9 and $(e.target).hasClass('link-url'))
@@ -2764,7 +2810,6 @@ class LinkPopover extends Popover
           @editor.selection.setRangeAfter @target, range
           @hide()
           @editor.trigger 'valuechanged'
-          @editor.trigger 'selectionchanged'
         , 0
 
     @unlinkEl.on 'click', (e) =>
@@ -2775,7 +2820,6 @@ class LinkPopover extends Popover
       range = document.createRange()
       @editor.selection.setRangeAfter txtNode, range
       @editor.trigger 'valuechanged'
-      @editor.trigger 'selectionchanged'
 
   show: (args...) ->
     super args...
@@ -2784,7 +2828,10 @@ class LinkPopover extends Popover
 
 
 
-Simditor.Toolbar.addButton(LinkButton)
+Simditor.Toolbar.addButton LinkButton
+
+
+
 
 
 
@@ -2794,7 +2841,7 @@ class ImageButton extends Button
 
   icon: 'picture-o'
 
-  title: '插入图片'
+  title: Simditor._t 'insertImage'
 
   htmlTag: 'img'
 
@@ -2810,15 +2857,15 @@ class ImageButton extends Button
 
   menu: [{
     name: 'upload-image',
-    text: '本地图片'
+    text: Simditor._t 'localImage'
   }, {
     name: 'external-image',
-    text: '外链图片'
+    text: Simditor._t 'externalImage'
   }]
 
-  constructor: (@editor) ->
+  _init: () ->
     @menu = false unless @editor.uploader?
-    super @editor
+    super()
 
     @defaultImage = @editor.opts.defaultImage
     #@maxWidth = @editor.opts.maxImageWidth || @editor.body.width()
@@ -2831,10 +2878,7 @@ class ImageButton extends Button
       range = document.createRange()
       range.selectNode $img[0]
       @editor.selection.selectRange range
-      setTimeout =>
-        @editor.body.focus()
-        @editor.trigger 'selectionchanged'
-      , 0
+      @editor.trigger 'selectionchanged' unless @editor.util.supportSelectionChange
 
       false
 
@@ -2871,7 +2915,8 @@ class ImageButton extends Button
 
   render: (args...) ->
     super args...
-    @popover = new ImagePopover(@)
+    @popover = new ImagePopover
+      button: @
 
   renderMenu: ->
     super()
@@ -2881,7 +2926,7 @@ class ImageButton extends Button
 
     createInput = =>
       $input.remove() if $input
-      $input = $('<input type="file" title="上传图片" accept="image/*">')
+      $input = $('<input type="file" title="' + Simditor._t('uploadImage') + '" accept="image/*">')
         .appendTo($uploadItem)
 
     createInput()
@@ -2928,7 +2973,7 @@ class ImageButton extends Button
         return unless $img.hasClass('uploading')
         src = if img then img.src else @defaultImage
 
-        @loadImage $img, src, () =>
+        @loadImage $img, src, =>
           @popover.refresh()
           @popover.srcEl.val('正在上传...')
             .prop('disabled', true)
@@ -2960,17 +3005,15 @@ class ImageButton extends Button
       $img.removeData 'mask'
 
       if result.success == false
-        msg = result.msg || '上传被拒绝了'
-        if simple? and simple.message?
-          simple.message
+        msg = result.msg || Simditor._t('uploadFailed')
+        if simple? and simple.dialog? and simple.dialog.message?
+          simple.dialog.message
             content: msg
         else
           alert msg
         $img.attr 'src', @defaultImage
       else
-
         $img.attr 'src', result.file_path
-        $img.css 'width', '100%'
 
       @popover.srcEl.prop('disabled', false)
 
@@ -2988,10 +3031,10 @@ class ImageButton extends Button
           result = $.parseJSON xhr.responseText
           msg = result.msg
         catch e
-          msg = '上传出错了'
+          msg = Simditor._t('uploadError')
 
-        if simple? and simple.message?
-          simple.message
+        if simple? and simple.dialog? and simple.dialog.message?
+          simple.dialog.message
             content: msg
         else
           alert msg
@@ -3020,19 +3063,11 @@ class ImageButton extends Button
     $mask = $img.data('mask')
     if !$mask
       $mask = $('<div class="simditor-image-loading"><span></span></div>')
+        .hide()
         .appendTo(@editor.wrapper)
-      $mask.addClass('uploading') if $img.hasClass('uploading') and @editor.uploader.html5
+      $mask.addClass('uploading') if $img.hasClass('uploading')
       $img.data('mask', $mask)
       $mask.data('img', $img)
-
-    imgPosition = $img.position()
-    toolbarH = @editor.toolbar.wrapper.outerHeight()
-    $mask.css({
-      top: imgPosition.top + toolbarH,
-      left: imgPosition.left,
-      width: $img.width(),
-      height: $img.height()
-    })
 
     img = new Image()
 
@@ -3050,14 +3085,19 @@ class ImageButton extends Button
         src: src,
         #width: width,
         #height: height,
-        'data-image-size': img.width + ',' + img.height
+        'data-image-size': width + ',' + height
       })
 
       if $img.hasClass 'uploading' # img being uploaded
+        @editor.util.reflow @editor.body
+        wrapperOffset = @editor.wrapper.offset()
+        imgOffset = $img.offset()
         $mask.css({
+          top: imgOffset.top - wrapperOffset.top,
+          left: imgOffset.left - wrapperOffset.left,
           width: $img.width(),
           height: $img.height()
-        })
+        }).show()
       else
         $mask.remove()
         $img.removeData('mask')
@@ -3080,6 +3120,10 @@ class ImageButton extends Button
     if $block.is('p') and !@editor.util.isEmptyNode $block
       $block = $('<p/>').append(@editor.util.phBr).insertAfter($block)
       @editor.selection.setRangeAtStartOf $block, range
+    #else if $block.is('li')
+      #$block = @editor.util.furthestNode $block, 'ul, ol'
+      #$block = $('<p/>').append(@editor.util.phBr).insertAfter($block)
+      #@editor.selection.setRangeAtStartOf $block, range
 
     $img = $('<img/>').attr('alt', name)
     range.insertNode $img[0]
@@ -3096,7 +3140,7 @@ class ImageButton extends Button
 
     @loadImage $img, src or @defaultImage, =>
       @editor.trigger 'valuechanged'
-      $img[0].offsetHeight
+      @editor.util.reflow $img
       $img.click()
 
       @popover.one 'popovershow', =>
@@ -3109,10 +3153,19 @@ class ImagePopover extends Popover
   _tpl: """
     <div class="link-settings">
       <div class="settings-field">
-        <label>图片地址</label>
-        <input class="image-src" type="text"/>
-        <a class="btn-upload" href="javascript:;" title="上传图片" tabindex="-1">
+        <label>#{ Simditor._t 'imageUrl' }</label>
+        <input class="image-src" type="text" tabindex="1" />
+        <a class="btn-upload" href="javascript:;" title="#{ Simditor._t 'uploadImage' }" tabindex="-1">
           <span class="fa fa-upload"></span>
+        </a>
+      </div>
+      <div class="settings-field">
+        <label>#{ Simditor._t 'imageSize' }</label>
+        <input class="image-size" id="image-width" type="text" tabindex="2" />
+        <span class="times">×</span>
+        <input class="image-size" id="image-height" type="text" tabindex="3" />
+        <a class="btn-restore" href="javascript:;" title="#{ Simditor._t 'restoreImageSize' }" tabindex="-1">
+          <span class="fa fa-reply"></span>
         </a>
       </div>
     </div>
@@ -3122,16 +3175,13 @@ class ImagePopover extends Popover
     top: 6
     left: -4
 
-  constructor: (@button) ->
-    super @button.editor
-
   render: ->
     @el.addClass('image-popover')
       .append(@_tpl)
     @srcEl = @el.find '.image-src'
 
     @srcEl.on 'keydown', (e) =>
-      if e.which == 13 or e.which == 27 or e.which == 9
+      if e.which == 13 or e.which == 27
         e.preventDefault()
 
         if e.which == 13 and !@target.hasClass('uploading')
@@ -3147,6 +3197,37 @@ class ImagePopover extends Popover
           @button.editor.selection.setRangeAfter @target
           @hide()
 
+    @widthEl = @el.find '#image-width'
+    @heightEl = @el.find '#image-height'
+
+    @el.find('.image-size').on 'blur', (e) =>
+      @_resizeImg $(e.currentTarget)
+      @el.data('popover').refresh()
+
+    @el.find('.image-size').on 'keyup', (e) =>
+      inputEl = $(e.currentTarget)
+      unless e.which == 13 or e.which == 27 or e.which == 9
+        @_resizeImg inputEl, true
+
+    @el.find('.image-size').on 'keydown', (e) =>
+      inputEl = $(e.currentTarget)
+      if e.which == 13 or e.which == 27
+        e.preventDefault()
+        if e.which == 13
+          @_resizeImg inputEl
+        else
+          @_restoreImg()
+
+        @button.editor.body.focus()
+        @button.editor.selection.setRangeAfter @target
+        @hide()
+      else if e.which == 9
+        @el.data('popover').refresh()
+
+    @el.find('.btn-restore').on 'click', (e) =>
+      @_restoreImg()
+      @el.data('popover').refresh()
+
     @editor.on 'valuechanged', (e) =>
       @refresh() if @active
 
@@ -3160,7 +3241,7 @@ class ImagePopover extends Popover
 
     createInput = =>
       @input.remove() if @input
-      @input = $('<input type="file" title="上传图片" accept="image/*">')
+      @input = $('<input type="file" title="' + Simditor._t('uploadImage') + '" accept="image/*">')
         .appendTo($uploadBtn)
 
     createInput()
@@ -3175,17 +3256,46 @@ class ImagePopover extends Popover
       })
       createInput()
 
+  _resizeImg: (inputEl, onlySetVal = false) ->
+    value = inputEl.val() * 1
+    return unless $.isNumeric(value) or value < 0
+
+    if inputEl.is @widthEl
+      height = @height * value / @width
+      @heightEl.val height
+    else
+      width = @width * value / @height
+      @widthEl.val width
+
+    unless onlySetVal
+      @target.attr
+        width: width || value
+        height: height || value
+
+  _restoreImg: ->
+    size = @target.data('image-size')?.split(",") || [@width, @height]
+    @target.attr
+      width: size[0] * 1
+      height: size[1] * 1
+    @widthEl.val(size[0])
+    @heightEl.val(size[1])
+
   show: (args...) ->
     super args...
     $img = @target
+    @width = $img.width()
+    @height = $img.height()
+
     if $img.hasClass 'uploading'
-      @srcEl.val '正在上传'
+      @srcEl.val Simditor._t('uploading')
     else
       @srcEl.val $img.attr('src')
-      $img.css 'max-width', '100%'
+      @widthEl.val @width
+      @heightEl.val @height
 
 
-Simditor.Toolbar.addButton(ImageButton)
+Simditor.Toolbar.addButton ImageButton
+
 
 
 class IndentButton extends Button
@@ -3194,7 +3304,7 @@ class IndentButton extends Button
 
   icon: 'indent'
 
-  title: '向右缩进（Tab）'
+  title: Simditor._t('indent') + ' (Tab)'
 
   status: ($node) ->
     true
@@ -3203,7 +3313,7 @@ class IndentButton extends Button
     @editor.util.indent()
 
 
-Simditor.Toolbar.addButton(IndentButton)
+Simditor.Toolbar.addButton IndentButton
 
 
 
@@ -3213,7 +3323,7 @@ class OutdentButton extends Button
 
   icon: 'outdent'
 
-  title: '向左缩进（Shift + Tab）'
+  title: Simditor._t('outdent') + ' (Shift + Tab)'
 
   status: ($node) ->
     true
@@ -3222,7 +3332,8 @@ class OutdentButton extends Button
     @editor.util.outdent()
 
 
-Simditor.Toolbar.addButton(OutdentButton)
+Simditor.Toolbar.addButton OutdentButton
+
 
 
 
@@ -3233,7 +3344,7 @@ class HrButton extends Button
 
   icon: 'minus'
 
-  title: '分隔线'
+  title: Simditor._t 'hr'
 
   htmlTag: 'hr'
 
@@ -3258,10 +3369,10 @@ class HrButton extends Button
       @editor.selection.restore()
 
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
 
 
-Simditor.Toolbar.addButton(HrButton)
+Simditor.Toolbar.addButton HrButton
+
 
 
 
@@ -3271,7 +3382,7 @@ class TableButton extends Button
 
   icon: 'table'
 
-  title: '表格'
+  title: Simditor._t 'table'
 
   htmlTag: 'table'
 
@@ -3279,8 +3390,8 @@ class TableButton extends Button
 
   menu: true
 
-  constructor: (args...) ->
-    super args...
+  _init: ->
+    super()
 
     $.merge @editor.formatter._allowedTags, ['tbody', 'tr', 'td', 'colgroup', 'col']
     $.extend(@editor.formatter._allowedAttributes, {
@@ -3439,23 +3550,23 @@ class TableButton extends Button
     $table.parent().replaceWith($table)
 
   renderMenu: ->
-    $('''
+    $("""
       <div class="menu-create-table">
       </div>
       <div class="menu-edit-table">
         <ul>
-          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteRow"><span>删除行</span></a></li>
-          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowAbove"><span>在上面插入行</span></a></li>
-          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowBelow"><span>在下面插入行</span></a></li>
+          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteRow"><span>#{ Simditor._t 'deleteRow' }</span></a></li>
+          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowAbove"><span>#{ Simditor._t 'insertRowAbove' }</span></a></li>
+          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowBelow"><span>#{ Simditor._t 'insertRowBelow' }</span></a></li>
           <li><span class="separator"></span></li>
-          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteCol"><span>删除列</span></a></li>
-          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColLeft"><span>在左边插入列</span></a></li>
-          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColRight"><span>在右边插入列</span></a></li>
+          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteCol"><span>#{ Simditor._t 'delteColumn' }</span></a></li>
+          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColLeft"><span>#{ Simditor._t 'insertColumnLeft' }</span></a></li>
+          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColRight"><span>#{ Simditor._t 'insertColumnRight' }</span></a></li>
           <li><span class="separator"></span></li>
-          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteTable"><span>删除表格</span></a></li>
+          <li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteTable"><span>#{ Simditor._t 'deleteTable' }</span></a></li>
         </ul>
       </div>
-    ''').appendTo(@menuWrapper)
+    """).appendTo(@menuWrapper)
 
     @createMenu = @menuWrapper.find('.menu-create-table')
     @editMenu = @menuWrapper.find('.menu-edit-table')
@@ -3491,7 +3602,6 @@ class TableButton extends Button
       @decorate $table
       @editor.selection.setRangeAtStartOf $table.find('td:first')
       @editor.trigger 'valuechanged'
-      @editor.trigger 'selectionchanged'
       false
 
   createTable: (row, col, phBr) ->
@@ -3616,7 +3726,6 @@ class TableButton extends Button
       return
 
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
 
 
 Simditor.Toolbar.addButton TableButton
@@ -3629,7 +3738,7 @@ class StrikethroughButton extends Button
 
   icon: 'strikethrough'
 
-  title: '删除线文字'
+  title: Simditor._t 'strikethrough'
 
   htmlTag: 'strike'
 
@@ -3646,10 +3755,13 @@ class StrikethroughButton extends Button
   command: ->
     document.execCommand 'strikethrough'
     @editor.trigger 'valuechanged'
-    @editor.trigger 'selectionchanged'
+
+    # strikethrough command won't trigger selectionchange event automatically
+    $(document).trigger 'selectionchange'
 
 
-Simditor.Toolbar.addButton(StrikethroughButton)
+Simditor.Toolbar.addButton StrikethroughButton
+
 
 class UndoButton extends Button
 

@@ -1,23 +1,17 @@
 
-class Uploader extends Module
+class Uploader extends SimpleModule
 
   @count: 0
 
   opts:
-    url: '/simditor'
+    url: ''
     params: null
     fileKey: 'upload_file'
     connectionCount: 3
-    leaveConfirm: '正在上传文件，如果离开上传会自动取消'
 
-  files: [] #files being uploaded
-
-  queue: [] #files waiting to be uploaded
-
-  html5: !!(window.File && window.FileList)
-
-  constructor: (opts = {}) ->
-    $.extend(@opts, opts)
+  _init: ->
+    @files = [] #files being uploaded
+    @queue = [] #files waiting to be uploaded
     @id = ++ Uploader.count
 
     # upload the files in the queue
@@ -34,9 +28,9 @@ class Uploader extends Module
 
       # for ie
       # TODO firefox can not set the string
-      e.originalEvent.returnValue = @opts.leaveConfirm
+      e.originalEvent.returnValue = @_t('leaveConfirm')
       # for webkit
-      return @opts.leaveConfirm
+      return @_t('leaveConfirm')
 
   generateId: (->
     id = 0
@@ -49,7 +43,7 @@ class Uploader extends Module
 
     if $.isArray file
       @upload(f, opts) for f in file
-    else if $(file).is('input:file') and @html5
+    else if $(file).is('input:file')
       key = $(file).attr('name')
       opts.fileKey = key if key
       @upload($.makeArray($(file)[0].files), opts)
@@ -67,19 +61,12 @@ class Uploader extends Module
     return if @triggerHandler('beforeupload', [file]) == false
 
     @files.push file
-    if @html5
-      @xhrUpload file
-    else
-      @iframeUpload file
-
+    @_xhrUpload file
     @uploading = true
 
   getFile: (fileObj) ->
     if fileObj instanceof window.File or fileObj instanceof window.Blob
       name = fileObj.fileName ? fileObj.name
-    else if $(fileObj).is('input:file')
-      name = $input.val().replace(/.*(\/|\\)/, "")
-      fileObj = $(fileObj).clone()
     else
       return null
 
@@ -92,7 +79,7 @@ class Uploader extends Module
     ext: if name then name.split('.').pop().toLowerCase() else ''
     obj: fileObj
 
-  xhrUpload: (file) ->
+  _xhrUpload: (file) ->
     formData = new FormData()
     formData.append(file.fileKey, file.obj)
     formData.append("original_filename", file.name)
@@ -124,66 +111,6 @@ class Uploader extends Module
       complete: (xhr, status) =>
         @trigger 'uploadcomplete', [file, xhr.responseText]
 
-  iframeUpload: (file) ->
-    file.iframe = $('iframe', {
-      src: 'javascript:false;',
-      name: 'uploader-' + file.id
-    }).hide()
-      .appendTo(document.body)
-
-    fileObj.attr 'name', file.fileKey
-
-    file.form = $('<form/>', {
-      method: 'post',
-      enctype: 'multipart/form-data',
-      action: file.url,
-      target: file.iframe[0].name
-    }).hide()
-      .append(file.obj)
-      .appendTo(document.body)
-
-    if file.params
-      for k, v of file.params
-        $('<input/>', {
-          type: 'hidden',
-          name: k,
-          value: v
-        }).appendTo(form)
-
-    file.iframe.on 'load', =>
-      # when we remove iframe from dom
-      # the request stops, but in IE load
-      # event fires
-      return unless iframe.parent().length > 0
-
-      iframeDoc = iframe[0].contentDocument
-
-      # In Opera event is fired second time
-      # when body.innerHTML changed from false
-      # to server response approx. after 1 sec
-      # when we upload file with iframe
-      return if iframeDoc and iframeDoc.body and iframeDoc.body.innerHTML == "false"
-
-      # 当返回的JSON中存在html片段时，需要做这个hack
-      # json-response是一个script标签
-      # TODO: 简化服务器端的操作
-      responseEl = iframeDoc.getElementById('json-response')
-      json = if responseEl then responseEl.innerHTML else iframeDoc.body.innerHTML
-
-      try
-        result = $.parseJSON json
-      catch error
-        @trigger 'uploaderror', [file, null, 'parsererror']
-        result = {}
-
-      if result.success
-        @trigger 'uploadsuccess', [file, result]
-
-      @trigger 'uploadcomplete', [file, result]
-      file.iframe.remove()
-
-    file.form.submit().remove()
-
   cancel: (file) ->
     unless file.id
       for f in @files
@@ -193,15 +120,9 @@ class Uploader extends Module
 
     @trigger 'uploadcancel', [file]
 
-    if @html5
-      # abort xhr will trigger complete event automatically
-      file.xhr.abort() if file.xhr
-      file.xhr = null
-    else
-      file.iframe
-        .attr('src', 'javascript:false;')
-        .remove()
-      @trigger 'uploadcomplete', [file]
+    # abort xhr will trigger complete event automatically
+    file.xhr.abort() if file.xhr
+    file.xhr = null
 
   readImageFile: (fileObj, callback) ->
     return unless $.isFunction callback
@@ -226,11 +147,14 @@ class Uploader extends Module
     $(window).off '.uploader-' + @id
     $(document).off '.uploader-' + @id
 
+  @i18n:
+    'zh-CN': 
+      leaveConfirm: '正在上传文件，如果离开上传会自动取消'
+
+  @locale: 'zh-CN'
 
 
-@simple ||= {}
-
-@simple.uploader = (opts) ->
+uploader = (opts) ->
   new Uploader(opts)
 
 

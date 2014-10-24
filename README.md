@@ -2,7 +2,6 @@ simditor-rails
 ===========================
 
 
-
 Simditor官方：
 ----------------------------------
 http://simditor.tower.im/
@@ -11,8 +10,8 @@ http://simditor.tower.im/
 simditor-rails
 ---------------------------------
 
-Scott1743/simditor-rails基于[Simditor（v1.0.5）](http://simditor.tower.im/)和[Carrierwave](https://github.com/carrierwaveuploader/carrierwave)，Rails（> 3.2.18）
-通用版是一个含有客户端图片上传功能、自动初始化、预设宽度的版本。
+huyipeng基于[Scott1743/simditor-rails](https://github.com/Scott1743/simditor-rails)进行改进的版本，主要用来自用，最大的更新是跟进了simditor官方最新的2.0版本。
+
 
 ## 配置
 
@@ -21,7 +20,7 @@ Scott1743/simditor-rails基于[Simditor（v1.0.5）](http://simditor.tower.im/)�
 添加到Gemfile
 
 ###
-    gem 'simditor', github: 'Scott1743/simditor', branch: 'universal_version'
+    gem 'simditor', github: 'huyipeng/simditor-rails', branch: 'universal_version'
     bundle install
 
 拷贝迁移文件
