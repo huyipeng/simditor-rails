@@ -7,11 +7,11 @@ require "simditor/version"
 Gem::Specification.new do |s|
   s.name        = "simditor"
   s.version     = Simditor::VERSION
-  s.authors     = ["Scott1743"]
-  s.email       = ["yzt91@163.com"]
+  s.authors     = ["Scott1743 & huyipeng"]
+  s.email       = ["yzt91@163.com & hooiphone@gmail.com"]
   s.homepage    = ""
   s.summary     = ""
-  s.description = "Simditor for Youyu production"
+  s.description = "Simditor"
 
 
   s.files = Dir["{app,config,db,lib,vendor}/**/*", "MIT-LICENSE", "Rakefile", "README.rdoc"]
