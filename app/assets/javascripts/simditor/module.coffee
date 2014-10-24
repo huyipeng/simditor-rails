@@ -1,169 +1,190 @@
-((root, factory) ->
-  if typeof define is "function" and define.amd
-    
-    # AMD. Register as an anonymous module.
-    define "simple-module", ["jquery"], ($) ->
-      root.returnExportsGlobal = factory($)
+(function (root, factory) {
+  if (typeof define === 'function' && define.amd) {
+    // AMD. Register as an anonymous module.
+    define('simple-module', ["jquery"], function ($) {
+      return (root.returnExportsGlobal = factory($));
+    });
+  } else if (typeof exports === 'object') {
+    // Node. Does not work with strict CommonJS, but
+    // only CommonJS-like enviroments that support module.exports,
+    // like Node.
+    module.exports = factory(require("jquery"));
+  } else {
+    root['SimpleModule'] = factory(jQuery);
+  }
+}(this, function ($) {
 
-  else if typeof exports is "object"
-    
-    # Node. Does not work with strict CommonJS, but
-    # only CommonJS-like enviroments that support module.exports,
-    # like Node.
-    module.exports = factory(require("jquery"))
-  else
-    root["SimpleModule"] = factory(jQuery)
-  return
-) this, ($) ->
-  Module = undefined
-  __slice_ = [].slice
-  Module = (->
-    Module = (opts) ->
-      cls = undefined
-      instance = undefined
-      instances = undefined
-      name = undefined
-      _base = undefined
-      _i = undefined
-      _len = undefined
-      @opts = $.extend({}, @opts, opts)
-      (_base = @constructor)._connectedClasses or (_base._connectedClasses = [])
-      instances = (->
-        _i = undefined
-        _len = undefined
-        _ref = undefined
-        _results = undefined
-        _ref = @constructor._connectedClasses
-        _results = []
-        _i = 0
-        _len = _ref.length
+var Module,
+  __slice = [].slice;
 
-        while _i < _len
-          cls = _ref[_i]
-          name = cls.name.charAt(0).toLowerCase() + cls.name.slice(1)
-          cls::_module = this  if cls::_connected
-          _results.push this[name] = new cls()
-          _i++
-        _results
-      ).call(this)
-      if @_connected
-        @opts = $.extend({}, @opts, @_module.opts)
-      else
-        @_init()
-        _i = 0
-        _len = instances.length
+Module = (function() {
+  Module.extend = function(obj) {
+    var key, val, _ref;
+    if (!((obj != null) && typeof obj === 'object')) {
+      return;
+    }
+    for (key in obj) {
+      val = obj[key];
+      if (key !== 'included' && key !== 'extended') {
+        this[key] = val;
+      }
+    }
+    return (_ref = obj.extended) != null ? _ref.call(this) : void 0;
+  };
 
-        while _i < _len
-          instance = instances[_i]
-          instance._init()  if typeof instance._init is "function"
-          _i++
-      @trigger "initialized"
-      return
-    Module.extend = (obj) ->
-      key = undefined
-      val = undefined
-      _ref = undefined
-      return  unless (obj?) and typeof obj is "object"
-      for key of obj
-        val = obj[key]
-        this[key] = val  if key isnt "included" and key isnt "extended"
-      (if (_ref = obj.extended)? then _ref.call(this) else undefined)
+  Module.include = function(obj) {
+    var key, val, _ref;
+    if (!((obj != null) && typeof obj === 'object')) {
+      return;
+    }
+    for (key in obj) {
+      val = obj[key];
+      if (key !== 'included' && key !== 'extended') {
+        this.prototype[key] = val;
+      }
+    }
+    return (_ref = obj.included) != null ? _ref.call(this) : void 0;
+  };
 
-    Module.include = (obj) ->
-      key = undefined
-      val = undefined
-      _ref = undefined
-      return  unless (obj?) and typeof obj is "object"
-      for key of obj
-        val = obj[key]
-        @::[key] = val  if key isnt "included" and key isnt "extended"
-      (if (_ref = obj.included)? then _ref.call(this) else undefined)
+  Module.connect = function(cls) {
+    if (typeof cls !== 'function') {
+      return;
+    }
+    if (!cls.name) {
+      throw new Error('Widget.connect: cannot connect anonymous class');
+      return;
+    }
+    cls.prototype._connected = true;
+    if (!this._connectedClasses) {
+      this._connectedClasses = [];
+    }
+    this._connectedClasses.push(cls);
+    if (cls.name) {
+      return this[cls.name] = cls;
+    }
+  };
 
-    Module.connect = (cls) ->
-      return  if typeof cls isnt "function"
-      throw new Error("Widget.connect: cannot connect anonymous class")return  unless cls.name
-      cls::_connected = true
-      @_connectedClasses = []  unless @_connectedClasses
-      @_connectedClasses.push cls
-      this[cls.name] = cls  if cls.name
+  Module.prototype.opts = {};
 
-    Module::opts = {}
-    Module::_init = ->
+  function Module(opts) {
+    var cls, instance, instances, name, _base, _i, _len;
+    this.opts = $.extend({}, this.opts, opts);
+    (_base = this.constructor)._connectedClasses || (_base._connectedClasses = []);
+    instances = (function() {
+      var _i, _len, _ref, _results;
+      _ref = this.constructor._connectedClasses;
+      _results = [];
+      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+        cls = _ref[_i];
+        name = cls.name.charAt(0).toLowerCase() + cls.name.slice(1);
+        if (cls.prototype._connected) {
+          cls.prototype._module = this;
+        }
+        _results.push(this[name] = new cls());
+      }
+      return _results;
+    }).call(this);
+    if (this._connected) {
+      this.opts = $.extend({}, this.opts, this._module.opts);
+    } else {
+      this._init();
+      for (_i = 0, _len = instances.length; _i < _len; _i++) {
+        instance = instances[_i];
+        if (typeof instance._init === "function") {
+          instance._init();
+        }
+      }
+    }
+    this.trigger('initialized');
+  }
 
-    Module::on = ->
-      args = undefined
-      _ref = undefined
-      args = (if 1 <= arguments.length then __slice_.call(arguments, 0) else [])
-      (_ref = $(this)).on.apply _ref, args
-      this
+  Module.prototype._init = function() {};
 
-    Module::one = ->
-      args = undefined
-      _ref = undefined
-      args = (if 1 <= arguments.length then __slice_.call(arguments, 0) else [])
-      (_ref = $(this)).one.apply _ref, args
-      this
+  Module.prototype.on = function() {
+    var args, _ref;
+    args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+    (_ref = $(this)).on.apply(_ref, args);
+    return this;
+  };
 
-    Module::off = ->
-      args = undefined
-      _ref = undefined
-      args = (if 1 <= arguments.length then __slice_.call(arguments, 0) else [])
-      (_ref = $(this)).off.apply _ref, args
-      this
+  Module.prototype.one = function() {
+    var args, _ref;
+    args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+    (_ref = $(this)).one.apply(_ref, args);
+    return this;
+  };
 
-    Module::trigger = ->
-      args = undefined
-      _ref = undefined
-      args = (if 1 <= arguments.length then __slice_.call(arguments, 0) else [])
-      (_ref = $(this)).trigger.apply _ref, args
-      this
+  Module.prototype.off = function() {
+    var args, _ref;
+    args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+    (_ref = $(this)).off.apply(_ref, args);
+    return this;
+  };
 
-    Module::triggerHandler = ->
-      args = undefined
-      _ref = undefined
-      args = (if 1 <= arguments.length then __slice_.call(arguments, 0) else [])
-      (_ref = $(this)).triggerHandler.apply _ref, args
+  Module.prototype.trigger = function() {
+    var args, _ref;
+    args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+    (_ref = $(this)).trigger.apply(_ref, args);
+    return this;
+  };
 
-    Module::_t = ->
-      args = undefined
-      _ref = undefined
-      args = (if 1 <= arguments.length then __slice_.call(arguments, 0) else [])
-      (_ref = @constructor)._t.apply _ref, args
+  Module.prototype.triggerHandler = function() {
+    var args, _ref;
+    args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+    return (_ref = $(this)).triggerHandler.apply(_ref, args);
+  };
 
-    Module._t = ->
-      args = undefined
-      key = undefined
-      result = undefined
-      _ref = undefined
-      key = arguments[0]
-      args = (if 2 <= arguments.length then __slice_.call(arguments, 1) else [])
+  Module.prototype._t = function() {
+    var args, _ref;
+    args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+    return (_ref = this.constructor)._t.apply(_ref, args);
+  };
 
-      result = ((if (_ref = @i18n[@locale])? then _ref[key] else undefined)) or ""
-      return result  unless args.length > 0
-      result = result.replace(/([^%]|^)%(?:(\d+)\$)?s/g, (p0, p, position) ->
-        if position
-          p + args[parseInt(position) - 1]
-        else
-          p + args.shift()
-      )
-      result.replace /%%s/g, "%s"
+  Module._t = function() {
+    var args, key, result, _ref;
+    key = arguments[0], args = 2 <= arguments.length ? __slice.call(arguments, 1) : [];
+    result = ((_ref = this.i18n[this.locale]) != null ? _ref[key] : void 0) || '';
+    if (!(args.length > 0)) {
+      return result;
+    }
+    result = result.replace(/([^%]|^)%(?:(\d+)\$)?s/g, function(p0, p, position) {
+      if (position) {
+        return p + args[parseInt(position) - 1];
+      } else {
+        return p + args.shift();
+      }
+    });
+    return result.replace(/%%s/g, '%s');
+  };
 
-    Module.i18n = "zh-CN": {}
-    Module.locale = "zh-CN"
-    Module
-  )()
-  if Function::name is undefined and Object.defineProperty
-    Object.defineProperty Function::, "name",
-      get: ->
-        re = undefined
-        results = undefined
-        re = /function\s+([^\s(]+)\s*\(/
-        results = re.exec(@toString())
-        if results and results.length > 1
-          results[1]
-        else
-          ""
+  Module.i18n = {
+    'zh-CN': {}
+  };
 
-      set: (val) ->
+  Module.locale = 'zh-CN';
 
-  Module
+  return Module;
+
+})();
+
+if (Function.prototype.name === void 0 && Object.defineProperty) {
+  Object.defineProperty(Function.prototype, 'name', {
+    get: function() {
+      var re, results;
+      re = /function\s+([^\s(]+)\s*\(/;
+      results = re.exec(this.toString());
+      if (results && results.length > 1) {
+        return results[1];
+      } else {
+        return "";
+      }
+    },
+    set: function(val) {}
+  });
+}
+
+
+return Module;
+
+
+}));
